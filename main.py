@@ -154,19 +154,6 @@ def modify_decimal_part(num: float | str) -> float:
     return float(new_num_str)
 
 
-def pick_location(locations: list) -> dict:
-    """
-    从定位点列表中随机选取一个定位点。
-
-    参数：
-        locations — 定位点字典列表，每项包含 lat / lng / acc
-
-    返回：
-        随机选中的定位点字典
-    """
-    return random.choice(locations)
-
-
 def qiandao(
     class_id: str,
     cookies: list,
@@ -418,16 +405,14 @@ def show_countdown(schedule_times: list):
     参数：
         schedule_times — 定时时间字符串列表，格式 "HH:MM"
     """
-    import time as _time
-
-    now = _time.time()
+    now = time.time()
     # 计算所有时间点的下次触发时间戳，取最近的一个
     next_stamps = []
     for t_str in schedule_times:
         hour, minute = map(int, t_str.split(":"))
-        today = _time.strftime("%Y-%m-%d", _time.localtime(now))
-        target_struct = _time.strptime(f"{today} {hour:02d}:{minute:02d}:00", "%Y-%m-%d %H:%M:%S")
-        stamp = _time.mktime(target_struct)
+        today = time.strftime("%Y-%m-%d", time.localtime(now))
+        target_struct = time.strptime(f"{today} {hour:02d}:{minute:02d}:00", "%Y-%m-%d %H:%M:%S")
+        stamp = time.mktime(target_struct)
         if stamp < now:
             stamp += 24 * 3600   # 今天已过，改为明天
         next_stamps.append((stamp, t_str))
@@ -438,7 +423,7 @@ def show_countdown(schedule_times: list):
 
     hours, rem = divmod(remaining, 3600)
     minutes, seconds = divmod(rem, 60)
-    current = _time.strftime("%Y-%m-%d %H:%M", _time.localtime(now))
+    current = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
 
     if remaining < 300:
         # 5 分钟内：显示分秒，每秒刷新
@@ -449,7 +434,7 @@ def show_countdown(schedule_times: list):
             f"剩余 [bold yellow]{minutes}[/bold yellow] 分 [bold yellow]{seconds}[/bold yellow] 秒   ",
             end=""
         )
-        _time.sleep(1)
+        time.sleep(1)
     else:
         # 5 分钟以上：显示时分，每分钟刷新
         console.print(
@@ -458,7 +443,7 @@ def show_countdown(schedule_times: list):
             f"剩余 [bold yellow]{hours}[/bold yellow] 小时 [bold yellow]{minutes}[/bold yellow] 分钟   ",
             end=""
         )
-        _time.sleep(60)
+        time.sleep(60)
 
 
 # ──────────────────────────────────────────────

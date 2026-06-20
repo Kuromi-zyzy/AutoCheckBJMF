@@ -196,7 +196,6 @@ def login_and_capture(existing_cookies: list) -> tuple[list, list]:
             # 等待扫码成功后页面出现课程列表元素
             if not page.wait.eles_loaded('t:a@class=media', timeout=120):
                 console.print("  [bold red]✗[/bold red] 等待登录超时，请重试。")
-                page.close()
                 continue
 
             console.print("  [bold green]✔[/bold green] 扫码登录成功！正在读取课程列表…")
@@ -232,9 +231,14 @@ def login_and_capture(existing_cookies: list) -> tuple[list, list]:
                 console.print("  [bold red]✗[/bold red] 监听超时，未能捕获 Cookie。")
 
         finally:
-            # 无论成功与否，都停止监听并关闭浏览器
-            page.listen.stop()
-            page.close()
+            try:
+                page.listen.stop()
+            except Exception:
+                pass
+            try:
+                page.close()
+            except Exception:
+                pass
 
         console.print(
             f"  [dim]当前已收集账号数：[bold]{len(cookie_list)}[/bold]，班级数：[bold]{len(class_set)}[/bold][/dim]"
@@ -336,9 +340,11 @@ def configure_locations(existing_locations: list) -> list:
             )
 
     finally:
-        # 输入完成后关闭地图浏览器
         console.print("\n  [cyan]▶[/cyan] 定位配置完成，关闭地图窗口…")
-        map_page.close()
+        try:
+            map_page.close()
+        except Exception:
+            pass
 
     return locations
 
