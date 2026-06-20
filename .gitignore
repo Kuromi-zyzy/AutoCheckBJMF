@@ -1,0 +1,9 @@
+config.json
+__pycache__/
+.venv/
+logs/*.txt
+logs/*.log
+*.pyc
+.idea/
+.vscode/
+*.DS_Store
