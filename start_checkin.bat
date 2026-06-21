@@ -17,7 +17,7 @@ if not exist "config.json" (
 )
 
 echo Starting auto check-in...
-powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -NoNewWindow -FilePath '.venv\Scripts\python.exe' -ArgumentList 'src\main.py' -WorkingDirectory '%~dp0'"
+powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -NoNewWindow -FilePath '.venv\Scripts\python.exe' -ArgumentList 'src\main.py'"
 echo.
 echo [OK] Check-in running in background.
 echo      Check sign_log.txt for records.
