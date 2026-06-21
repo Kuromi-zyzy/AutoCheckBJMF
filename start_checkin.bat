@@ -17,11 +17,11 @@ if not exist "config.json" (
 )
 
 echo Starting auto check-in...
-start /B "" ".venv\Scripts\python.exe" src\main.py
+powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -NoNewWindow -FilePath '.venv\Scripts\python.exe' -ArgumentList 'src\main.py' -WorkingDirectory '%~dp0'"
 echo.
 echo [OK] Check-in running in background.
 echo      Check sign_log.txt for records.
 echo      To stop: Task Manager - end python.exe
 echo.
-timeout /t 5 /nobreak >nul
+timeout /t 3 /nobreak >nul
 exit

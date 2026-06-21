@@ -122,11 +122,13 @@
 
 ### 第三步：启动签到（每天用）
 
-**双击 `start_checkin.bat`**，窗口显示 "Running in background" 后自动关闭。
+**双击 `start_checkin.bat`**，窗口显示 "[OK] Check-in running in background." 后自动关闭。
 
-程序在后台静默运行，到你设置的签到窗口时间就会自动检测并签到。
+程序在后台静默运行，到你设置的签到窗口时间（`schedule_window_start` - `schedule_window_end`）就会自动每隔 N 分钟（`schedule_interval`）检测并签到。
 
-确认程序是否在运行：右键任务栏 → 任务管理器 → 查找 `python.exe`。
+确认程序是否在运行：右键任务栏 → 任务管理器 → 详细信息 → 查找 `python.exe`。
+
+> ⚠️ **注意**：程序**仅在配置的时间窗口内**执行签到。窗口外会静默等待或直接退出，任务管理器可能看不到进程，这是正常行为。
 
 ---
 
