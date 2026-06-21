@@ -1,11 +1,11 @@
 @echo off
 chcp 65001 >nul
-title AutoCheckBJMF Setup Wizard
+title AutoCheckBJMF - 配置向导
 
 cd /d "%~dp0"
 
 if not exist ".venv\Scripts\python.exe" (
-    echo [ERROR] Virtual env not found. Please run install.bat first.
+    echo [ERROR] 虚拟环境未找到，请先运行 install.bat 安装
     pause
     exit /b 1
 )

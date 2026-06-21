@@ -4,8 +4,8 @@ set PYTHONIOENCODING=utf-8
 set STARTUP_DIR=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup
 copy /Y "%~dp0start_checkin.bat" "%STARTUP_DIR%\start_checkin.bat"
 if exist "%STARTUP_DIR%\start_checkin.bat" (
-    echo Success!
+    echo 添加成功！
 ) else (
-    echo Failed!
+    echo 添加失败！
 )
 pause

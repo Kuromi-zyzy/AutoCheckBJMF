@@ -24,7 +24,7 @@
   - [查看签到日志](#查看签到日志)
   - [停止签到](#停止签到)
 - [常见问题排查](#常见问题排查)
-- [文件夹结构](#文件夹结构)
+- [文件功能一览](#文件功能一览)
 - [配置文件格式](#配置文件格式)
 - [服务器部署（进阶）](#服务器部署进阶)
 - [注意事项 & 免责声明](#注意事项--免责声明)
@@ -41,7 +41,7 @@
 - **多定位点** — 支持多个坐标随机选取
 - **窗口扫描** — 设置时间段（如 08:00-22:00），程序自动每隔 N 分钟检测一次
 - **失败重试** — 签到失败后自动重试（30 秒 + 5 分钟后各一次）
-- **彩色终端** — Rich 库美化输出，签到结果一目了然
+- **后台静默运行** — 关掉终端窗口照样跑，不占屏幕
 
 ---
 
@@ -67,7 +67,7 @@
 
 ### 第一步：安装环境（仅首次）
 
-**双击 `install.bat`**，等待窗口显示 "Done!" 后按任意键关闭。
+**双击 `install.bat`**，等待窗口显示"安装完成！"后按任意键关闭。
 
 程序会自动做以下事情（全程无需你操作）：
 1. 检查电脑有没有装 Python
@@ -122,63 +122,45 @@
 
 ### 第三步：启动签到（每天用）
 
-**双击 `start_checkin.bat`**，窗口显示 "[OK] Check-in running in background." 后自动关闭。
+**双击 `start_checkin.bat`**，窗口显示"[OK] 签到程序已在后台静默运行"后自动关闭。
 
 程序在后台静默运行，到你设置的签到窗口时间（`schedule_window_start` - `schedule_window_end`）就会自动每隔 N 分钟（`schedule_interval`）检测并签到。
 
-确认程序是否在运行：右键任务栏 → 任务管理器 → 详细信息 → 查找 `python.exe`。
+确认程序是否在运行：右键任务栏 → 任务管理器 → 详细信息 → 查找 `pythonw.exe`。
 
-> ⚠️ **注意**：程序**仅在配置的时间窗口内**执行签到。窗口外会静默等待或直接退出，任务管理器可能看不到进程，这是正常行为。
+> ⚠️ **注意**：程序**仅在配置的时间窗口内**执行签到。窗口外会静默等待或退出，任务管理器可能看不到进程，这是正常行为。
 
 ---
 
 ## 进阶功能
 
-> **推荐使用 [PowerShell 7.6.5 (pwsh)](https://github.com/PowerShell/PowerShell) 进行命令行操作。**
-> 相比 Windows 自带的 PowerShell 5.1，pwsh 7.6.5 有以下优势：
-> - 原生 UTF-8 支持，中文不乱码
-> - 彩色输出更完整，签到状态一目了然
-> - 跨平台，同一套命令在 Windows / Linux / macOS 通用
-> - 安装后命令为 `pwsh`（不影响系统自带 PowerShell）
+### pwsh 7 命令行快速操作
 
-### 安装 pwsh 7.6.5
-
-```powershell
-# 方式一：winget 一键安装（推荐）
-winget install Microsoft.PowerShell
-
-# 方式二：下载安装包
-# https://github.com/PowerShell/PowerShell/releases/tag/v7.6.5
-# 选择 PowerShell-7.6.5-win-x64.msi
-```
-
-安装后在终端输入 `pwsh` 即可进入 PowerShell 7。
-
-### 快速操作（pwsh 环境下）
+如果你安装了 [PowerShell 7（pwsh）](https://github.com/PowerShell/PowerShell/releases)，可以用命令更灵活地操作：
 
 ```powershell
 # 进入项目目录（替换为你的实际路径）
 cd "D:\Tools\ClassMagicSign\AutoCheckBJMF"
 
+# 启动后台签到
+Start-Process -WindowStyle Hidden -FilePath ".venv\Scripts\pythonw.exe" -ArgumentList "src\main.py"
+
 # 立即签到一次
 .venv\Scripts\python.exe src\once.py
 
-# 启动后台定时签到
-Start-Process -NoNewWindow .venv\Scripts\python.exe -ArgumentList "src\main.py"
-
-# 查看签到日志
+# 查看最近 20 条签到记录
 Get-Content logs\sign_log.txt -Tail 20 -Encoding UTF8
 
 # 实时监控签到日志（持续刷新）
 Get-Content logs\sign_log.txt -Wait -Tail 10 -Encoding UTF8
 
 # 查看签到进程是否在运行
-Get-Process python -ErrorAction SilentlyContinue
+Get-Process pythonw -ErrorAction SilentlyContinue
 
 # 停止签到
-Stop-Process -Name python -Force -ErrorAction SilentlyContinue
+Stop-Process -Name pythonw -Force -ErrorAction SilentlyContinue
 
-# 用记事本打开配置
+# 用记事本打开配置文件
 notepad config.json
 ```
 
@@ -189,14 +171,13 @@ notepad config.json
 | 方式 | 操作 |
 |------|------|
 | 右键运行 | 右键 `checkin_now.ps1` → "使用 PowerShell 运行" |
-| pwsh 命令 | `pwsh -File checkin_now.ps1` |
 | 命令行 | `python src\once.py` |
 
 ### 开机自动启动签到
 
 | 方式 | 操作 |
 |------|------|
-| 双击 bat | 双击 `SetAutoStart.bat`，提示 "Success!" 即完成 |
+| 双击 bat | 双击 `SetAutoStart.bat`，提示"添加成功！"即完成 |
 
 以后每次开机签到程序自动后台运行。
 
@@ -205,7 +186,6 @@ notepad config.json
 | 方式 | 操作 |
 |------|------|
 | 手动删除 | 打开 `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`，删除里面的 `start_checkin.bat` |
-| pwsh 命令 | `Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\start_checkin.bat" -Force` |
 
 ### 手动修改配置
 
@@ -218,80 +198,84 @@ notepad config.json
 用记事本打开 `logs\sign_log.txt`，每次签到都会记录：
 
 ```
-2026-06-20 08:05:12 - UID[1 <张三>] | 班级[102513] | 签到结果：签到成功
-2026-06-20 08:05:15 - UID[2 <李四>] | 班级[102513] | 签到结果：签到成功
+2026-06-20 08:05:12 - UID[1 <张三>] | 班级[102513] | Result: 签到成功
+2026-06-20 08:05:15 - UID[2 <李四>] | 班级[102513] | Result: 签到成功
 ```
-
-> **pwsh 快捷查看：** `Get-Content logs\sign_log.txt -Tail 20 -Encoding UTF8`（看最近 20 条）  
-> **实时监控：** `Get-Content logs\sign_log.txt -Wait -Tail 10 -Encoding UTF8`（按 `Ctrl+C` 退出）
 
 ### 停止签到
 
 | 方式 | 操作 |
 |------|------|
-| 任务管理器 | `Ctrl+Shift+Esc` → 找到 `python.exe` → 结束任务 |
-| pwsh 命令 | `Stop-Process -Name python -Force` |
+| 任务管理器 | `Ctrl+Shift+Esc` → 找到 `pythonw.exe` → 结束任务 |
 
 ---
 
 ## 常见问题排查
 
-**Q：双击 bat 一闪而过？**  
+**Q：双击 bat 一闪而过？**
 A：检查是否运行过 `install.bat`。没安装的话先双击它。
 
-**Q：签到失败 / 日志显示"登录状态异常"？**  
+**Q：签到失败 / 日志显示"登录状态异常"？**
 A：99% 是 Cookie 过期了。双击 `config_wizard.bat`，选"不清空现有配置"，重新扫码登录后保存，再重启签到。
 
-**Q：扫码页面白屏 / 打开很慢？**  
+**Q：扫码页面白屏 / 打开很慢？**
 A：首次打开浏览器较慢，等一两分钟。检查网络是否能访问 `k8n.cn`。
 
-**Q：配置向导打开浏览器报错？**  
+**Q：配置向导打开浏览器报错？**
 A：可能缺少 Chrome。装了 Chrome 或 Edge 一般无需额外处理。报 "Chrome not found" 请安装 [Chrome](https://www.google.com/chrome/)。
 
-**Q：日志显示"无签到任务"？**  
+**Q：日志显示"无签到任务"？**
 A：不是 bug。老师还没发布签到任务，等发布后程序会自动检测到。
 
-**Q：多人坐标会不会一模一样？**  
+**Q：多人坐标会不会一模一样？**
 A：不会。每个账号签到自动随机偏移约 ±15 米。
 
-**Q：经纬度填多少合适？**  
+**Q：经纬度填多少合适？**
 A：[腾讯坐标拾取](https://lbs.qq.com/getPoint/) 点击位置获取，8 位小数最佳。
 
-**Q：能手机上运行吗？**  
+**Q：能手机上运行吗？**
 A：不能。仅支持 Windows 电脑（或 Linux 服务器）。
 
-**Q：sign_log.txt 没有记录？**  
+**Q：sign_log.txt 没有记录？**
 A：说明当前没有可签到的任务。有任务时会自动记录。
+
+**Q：关掉终端窗口后程序还会跑吗？**
+A：会。后台签到使用 `pythonw.exe` 独立运行，不依赖终端窗口。
 
 ---
 
-## 文件夹结构
+## 文件功能一览
 
 ```
 AutoCheckBJMF/
-├── install.bat             ← ① 双击安装环境（仅首次，自动装 Python 依赖）
-├── config_wizard.bat       ← ② 双击扫码配置（打开浏览器，按提示操作）
-├── start_checkin.bat       ← ③ 双击启动签到（后台静默运行，每天用它）
-├── SetAutoStart.bat        ←    双击设置开机自启（只需一次，以后开机自动签到）
-├── checkin_now.ps1         ←    右键 → PowerShell 运行，立刻签一次到
-├── config.json             ←    配置文件（向导自动生成，可用记事本打开修改）
 │
-├── src/                    ← 程序代码（不需要管）
-│   ├── main.py             ← 定时签到主程序
-│   ├── once.py             ← 立即签到程序
-│   ├── make_config.py      ← 配置向导程序
-│   ├── constants.py        ← 公共配置常量
-│   └── banner.py           ← 程序启动画面
+├── install.bat             安装环境（仅首次，自动创建虚拟环境 + 装依赖）
+├── config_wizard.bat       配置向导入口（双击打开，扫码登录、设置定位和时间）
+├── start_checkin.bat       启动后台签到（双击后自动在后台运行，关窗口不中断）
+├── SetAutoStart.bat        设置开机自启（把 start_checkin.bat 加入启动文件夹）
+├── checkin_now.ps1         立即签到一次（右键 → 使用 PowerShell 运行）
+├── config.json             配置文件（向导生成，含班级、账号、定位、时间窗口）
+├── config.example.json     配置示例文件（参考格式用）
 │
-├── logs/                   ← 签到日志
-│   └── sign_log.txt        ← 签到记录（用记事本打开查看每次签到结果）
+├── src/                    核心代码
+│   ├── main.py             后台签到主程序（定时检测 + 自动签到，无控制台输出）
+│   ├── once.py             立即签到程序（手动运行，签到一次后退出）
+│   ├── make_config.py      配置向导程序（交互式配置班级、Cookie、定位、时间）
+│   ├── constants.py        公共常量（路径、URL、UA 等，被各模块引用）
+│   └── banner.py           启动画面 & 控制台对象（供配置向导和签到脚本共用）
 │
-├── pyproject.toml          ← 项目说明 & 依赖列表（uv/pip 用）
-├── LICENSE                 ← GPL v3 开源协议
-├── .python-version         ← Python 版本要求（3.11）
-├── uv.lock                 ← 依赖版本锁定文件
+├── logs/                   签到日志目录
+│   ├── sign_log.txt        签到记录（每次签到结果都写在这里）
+│   ├── AutoCheckBJMF.log   调试日志（debug 模式开启时记录详细信息）
+│   └── .gitkeep            占位文件（确保 logs 目录被 Git 追踪）
 │
-└── .venv/                  ← Python 运行环境（自动生成，不要动）
+├── pyproject.toml          项目元数据 & 依赖列表
+├── uv.lock                 依赖版本锁定文件（uv 用）
+├── .python-version         Python 版本要求（3.11）
+├── .gitignore              Git 忽略规则
+├── LICENSE                 GPL v3 开源协议
+│
+└── .venv/                  Python 虚拟环境（install.bat 自动生成，不要手动动）
 ```
 
 ---
