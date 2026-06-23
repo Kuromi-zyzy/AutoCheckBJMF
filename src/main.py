@@ -18,7 +18,11 @@ import schedule
 from datetime import datetime
 from bs4 import BeautifulSoup
 
+from rich.console import Console
+
 from constants import CONFIG_PATH, COOKIE_KEY, BASE_URL, USER_AGENT, LOG_DIR
+
+console = Console()
 
 
 def load_config() -> dict:
