@@ -1,11 +1,12 @@
 import random
 import requests
 import re
-import time
 import os
 import sys
+import signal
+import threading
 
-if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+if sys.stdout is not None and sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     try:
         os.environ.setdefault("PYTHONIOENCODING", "utf-8")
         sys.stdout.reconfigure(encoding="utf-8")
@@ -14,6 +15,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import schedule
 from datetime import datetime
 from bs4 import BeautifulSoup
@@ -23,6 +25,12 @@ from rich.console import Console
 from constants import CONFIG_PATH, COOKIE_KEY, BASE_URL, USER_AGENT, LOG_DIR
 
 console = Console()
+
+_stop_event = threading.Event()
+
+
+def _signal_handler(signum, frame):
+    _stop_event.set()
 
 
 def load_config() -> dict:
@@ -54,15 +62,21 @@ def setup_logger(debug: bool) -> logging.Logger:
     logger = logging.getLogger("AutoCheckBJMF")
     logger.setLevel(logging.INFO)
 
-    sign_handler = logging.FileHandler(
-        os.path.join(LOG_DIR, "sign_log.txt"), encoding="utf-8", mode="a"
+    sign_handler = RotatingFileHandler(
+        os.path.join(LOG_DIR, "sign_log.txt"),
+        maxBytes=2 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
     )
     sign_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
     logger.addHandler(sign_handler)
 
     if debug:
-        debug_handler = logging.FileHandler(
-            os.path.join(LOG_DIR, "AutoCheckBJMF.log"), encoding="utf-8"
+        debug_handler = RotatingFileHandler(
+            os.path.join(LOG_DIR, "AutoCheckBJMF.log"),
+            maxBytes=2 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
         )
         debug_handler.setFormatter(
             logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
@@ -100,15 +114,21 @@ def qiandao(
     logger: logging.Logger
 ) -> tuple:
     url = f"{BASE_URL}/student/course/{class_id}/punchs"
+    session = requests.Session()
     error_cookies = []
     null_count = 0
     success_count = 0
+    had_task = False
 
     for uid, raw_cookie in enumerate(cookies):
+        if _stop_event.is_set():
+            break
+
         username_match = re.search(r'username=[^;]+', raw_cookie)
         username_tag = f" <{username_match.group(0).split('=')[1]}>" if username_match else ""
 
-        time.sleep(random.uniform(1, 3))
+        if _stop_event.wait(random.uniform(1, 3)):
+            break
 
         cookie_match = re.search(rf'{COOKIE_KEY}=[^;]+', raw_cookie)
         if not cookie_match:
@@ -130,7 +150,7 @@ def qiandao(
         }
 
         try:
-            response = requests.get(url, headers=headers, timeout=15)
+            response = session.get(url, headers=headers, timeout=15)
         except requests.RequestException:
             error_cookies.append(raw_cookie)
             continue
@@ -147,6 +167,7 @@ def qiandao(
         if gps_btn:
             gps_id = re.compile(r'\d+').search(gps_btn.get('id')).group(0)
             all_matches.append(gps_id)
+            had_task = True
 
         if not all_matches:
             logger.info(f"Class[{class_id}] | No active check-in tasks")
@@ -169,7 +190,7 @@ def qiandao(
             }
 
             try:
-                sign_resp = requests.post(sign_url, headers=headers, data=payload, timeout=15)
+                sign_resp = session.post(sign_url, headers=headers, data=payload, timeout=15)
             except requests.RequestException:
                 error_cookies.append(raw_cookie)
                 continue
@@ -201,7 +222,7 @@ def qiandao(
                 )
                 error_cookies.append(raw_cookie)
 
-    return error_cookies, null_count, success_count
+    return error_cookies, null_count, success_count, had_task
 
 
 def retry_with_backoff(
@@ -213,9 +234,12 @@ def retry_with_backoff(
     delay_seconds: int,
     attempt_label: str
 ) -> list:
-    logger.info(f"Class[{class_id}] | {len(error_cookies)} account(s) failed, {attempt_label} in {delay_seconds}s")
-    time.sleep(delay_seconds)
-    error_cookies, _, _ = qiandao(class_id, error_cookies, locations, debug, logger)
+    actual_delay = delay_seconds * random.uniform(0.5, 1.5)
+    logger.info(f"Class[{class_id}] | {len(error_cookies)} account(s) failed, {attempt_label} in {actual_delay:.0f}s")
+    if _stop_event.wait(actual_delay):
+        logger.info(f"Class[{class_id}] | {attempt_label} cancelled, exiting")
+        return error_cookies
+    error_cookies, _, _, _ = qiandao(class_id, error_cookies, locations, debug, logger)
     return error_cookies
 
 
@@ -225,13 +249,20 @@ def run_all_classes(
     locations: list,
     debug: bool,
     logger: logging.Logger
-):
+) -> bool:
     logger.info(f"Check-in start | Classes: {len(classes)}  Accounts: {len(cookies)}  Locations: {len(locations)}")
 
+    had_success = False
     for class_id in classes:
-        error_cookies, null_count, success_count = qiandao(
+        if _stop_event.is_set():
+            break
+
+        error_cookies, null_count, success_count, had_task = qiandao(
             class_id, cookies, locations, debug, logger
         )
+
+        if success_count > 0:
+            had_success = True
 
         if error_cookies:
             error_cookies = retry_with_backoff(
@@ -251,6 +282,7 @@ def run_all_classes(
             logger.info(f"Class[{class_id}] | all check-ins successful")
 
     logger.info("Check-in complete")
+    return had_success
 
 
 def main():
@@ -264,6 +296,12 @@ def main():
     logger = setup_logger(debug)
     logger.info("AutoCheckBJMF started")
 
+    signal.signal(signal.SIGINT, _signal_handler)
+    try:
+        signal.signal(signal.SIGTERM, _signal_handler)
+    except (ValueError, OSError):
+        pass
+
     def job():
         run_all_classes(classes, cookies, locations, debug, logger)
 
@@ -274,9 +312,10 @@ def main():
             schedule.every().day.at(t_str).do(job)
             logger.info(f"Registered task: daily at {t_str}")
 
-        while True:
+        while not _stop_event.is_set():
             schedule.run_pending()
-            time.sleep(1)
+            _stop_event.wait(1)
+        logger.info("AutoCheckBJMF stopped")
     else:
         win_start = cfg.get("schedule_window_start", "20:00")
         win_end   = cfg.get("schedule_window_end", "23:30")
@@ -290,26 +329,34 @@ def main():
         logger.info(f"Interval-scan mode active: {win_start}-{win_end} every {interval} min")
 
         last_scan = None
-        while True:
+        dynamic_interval = interval
+        while not _stop_event.is_set():
             now = datetime.now()
             current_minutes = now.hour * 60 + now.minute
 
             if start_minutes <= current_minutes < end_minutes:
-                if last_scan is None or (now - last_scan).total_seconds() >= interval * 60:
+                if last_scan is None or (now - last_scan).total_seconds() >= dynamic_interval * 60:
                     last_scan = now
-                    run_all_classes(classes, cookies, locations, debug, logger)
+                    had_success = run_all_classes(classes, cookies, locations, debug, logger)
+                    if had_success:
+                        dynamic_interval = min(interval * 2, 30)
+                        logger.info(f"Check-in succeeded, next scan in {dynamic_interval} min")
+                    else:
+                        dynamic_interval = interval
 
-                sleep_time = min(60, interval * 60 - (datetime.now() - last_scan).total_seconds())
+                sleep_time = min(60, dynamic_interval * 60 - (datetime.now() - last_scan).total_seconds())
                 if sleep_time > 0:
-                    time.sleep(sleep_time)
+                    _stop_event.wait(sleep_time)
 
             elif current_minutes < start_minutes:
                 wait_minutes = start_minutes - current_minutes
-                time.sleep(min(wait_minutes * 60, 1800))
+                _stop_event.wait(min(wait_minutes * 60, 1800))
 
             else:
                 logger.info("Check-in window ended")
                 break
+
+        logger.info("AutoCheckBJMF stopped")
 
 
 if __name__ == "__main__":
