@@ -1,9 +1,11 @@
 @echo off
+chcp 65001 >nul
+set PYTHONIOENCODING=utf-8
 set STARTUP_DIR=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup
-copy /Y "%~dp0AutoCheckBJMF.bat" "%STARTUP_DIR%\AutoCheckBJMF.bat"
-if exist "%STARTUP_DIR%\AutoCheckBJMF.bat" (
-    echo Success!
+copy /Y "%~dp0start_checkin.bat" "%STARTUP_DIR%\start_checkin.bat"
+if exist "%STARTUP_DIR%\start_checkin.bat" (
+    echo 添加成功！
 ) else (
-    echo Failed!
+    echo 添加失败！
 )
 pause

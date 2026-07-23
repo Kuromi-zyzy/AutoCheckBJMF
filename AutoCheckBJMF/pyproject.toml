@@ -1,7 +1,7 @@
 [project]
-name = "bjmf"
+name = "autocheck-bjmf"
 version = "0.1.0"
-description = "Add your description here"
+description = "班级魔方 GPS 自动签到工具，支持多账号、多班级、多定位点、定时签到"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

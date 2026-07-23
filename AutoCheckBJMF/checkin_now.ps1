@@ -1,3 +1,4 @@
-cd "C:\Users\tang\OneDrive\文档\ClassMagicSign\AutoCheckBJMF"
-.venv\Scripts\python.exe once.py
+$env:PYTHONIOENCODING='utf-8'
+cd $PSScriptRoot
+.venv\Scripts\python.exe src\once.py
 Read-Host "按任意键继续"

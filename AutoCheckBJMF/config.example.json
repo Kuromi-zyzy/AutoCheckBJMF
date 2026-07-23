@@ -1,0 +1,21 @@
+{
+    "classes": [
+        "123456",
+        "789012"
+    ],
+    "locations": [
+        {
+            "lat": "39.90123456",
+            "lng": "116.40123456",
+            "acc": "10"
+        }
+    ],
+    "cookies": [
+        "remember_student_59ba36addc2b2f9401580f014c7f58ea4e30989d=请替换为你的真实Cookie"
+    ],
+    "scheduletimes": ["auto"],
+    "schedule_window_start": "08:00",
+    "schedule_window_end": "22:00",
+    "schedule_interval": 5,
+    "debug": false
+}
