@@ -18,15 +18,50 @@ import logging
 from logging.handlers import RotatingFileHandler
 import schedule
 from datetime import datetime, timedelta
+from contextlib import contextmanager
 from bs4 import BeautifulSoup
 
 from rich.console import Console
 
 from constants import CONFIG_PATH, COOKIE_KEY, BASE_URL, USER_AGENT, LOG_DIR
 
+try:
+    import fcntl
+except ImportError:  # Windows entry points: no cross-process lock, scans just don't overlap there
+    fcntl = None
+
 console = Console()
 
 _stop_event = threading.Event()
+
+# Task IDs the server already refused (e.g. photo-required sign-ins).
+# Remembered so the scan loop stops re-submitting them every interval.
+_rejected_task_ids: set[str] = set()
+
+
+@contextmanager
+def _scan_lock(logger: logging.Logger):
+    """Cross-process exclusive scan lock.
+
+    The pm2 main loop and a TG /checkin subprocess can both trigger a scan;
+    the lock makes them wait for each other instead of signing with the same
+    cookies concurrently. Yields False when the lock is held elsewhere.
+    """
+    if fcntl is None:
+        yield True
+        return
+    os.makedirs(LOG_DIR, exist_ok=True)
+    fh = open(os.path.join(LOG_DIR, "scan.lock"), "w")
+    try:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            logger.info("Scan skipped: another scan is already running")
+            yield False
+            return
+        yield True
+    finally:
+        fh.close()  # closing the fd releases the flock
 
 
 def _signal_handler(signum, frame):
@@ -170,6 +205,12 @@ def qiandao(
             continue
 
         for match_id in all_matches:
+            if match_id in _rejected_task_ids:
+                logger.debug(
+                    f"Class[{class_id}] | CheckInID[{match_id}] skipped: "
+                    f"already rejected earlier (photo/other type)"
+                )
+                continue
             loc = pick_location(locations)
             new_lat = modify_decimal_part(loc["lat"])
             new_lng = modify_decimal_part(loc["lng"])
@@ -208,7 +249,9 @@ def qiandao(
                         success_count += 1
                         break
                     else:
-                        # e.g. photo-required sign-ins: submitted but rejected
+                        # e.g. photo-required sign-ins: the server refused this
+                        # task type, don't re-submit it on the next scan
+                        _rejected_task_ids.add(match_id)
                         logger.warning(
                             f"UID[{uid + 1}{username_tag}] | Class[{class_id}] | "
                             f"Check-in not accepted: {result_text}"
@@ -235,17 +278,18 @@ def retry_with_backoff(
     logger: logging.Logger,
     delay_seconds: int,
     attempt_label: str
-) -> list:
+) -> tuple:
     actual_delay = delay_seconds * random.uniform(0.5, 1.5)
     logger.info(f"Class[{class_id}] | {len(error_cookies)} account(s) failed, {attempt_label} in {actual_delay:.0f}s")
     if _stop_event.wait(actual_delay):
         logger.info(f"Class[{class_id}] | {attempt_label} cancelled, exiting")
-        return error_cookies
-    error_cookies, _, _, _ = qiandao(class_id, error_cookies, locations, debug, logger)
-    return error_cookies
+        return error_cookies, 0, 0, False
+    # Return the full result tuple: the retry's successes must be counted,
+    # otherwise a recovered retry is misreported as "not accepted".
+    return qiandao(class_id, error_cookies, locations, debug, logger)
 
 
-def run_all_classes(
+def _scan_all_classes(
     classes: list,
     cookies: list,
     locations: list,
@@ -272,14 +316,26 @@ def run_all_classes(
             had_activity = True
 
         if error_cookies:
-            error_cookies = retry_with_backoff(
+            error_cookies, retry_null, retry_success, retry_task = retry_with_backoff(
                 class_id, error_cookies, locations, debug, logger, 30, "1st retry"
             )
+            null_count += retry_null
+            success_count += retry_success
+            had_task = had_task or retry_task
+            if retry_success > 0:
+                had_success = True
+                had_activity = True
 
         if error_cookies:
-            error_cookies = retry_with_backoff(
+            error_cookies, retry_null, retry_success, retry_task = retry_with_backoff(
                 class_id, error_cookies, locations, debug, logger, 300, "2nd retry"
             )
+            null_count += retry_null
+            success_count += retry_success
+            had_task = had_task or retry_task
+            if retry_success > 0:
+                had_success = True
+                had_activity = True
 
         if error_cookies:
             logger.error(f"Class[{class_id}] | some accounts still failed after retries")
@@ -297,6 +353,23 @@ def run_all_classes(
     if had_activity:
         logger.info("Check-in complete")
     return had_success, had_activity
+
+
+def run_all_classes(
+    classes: list,
+    cookies: list,
+    locations: list,
+    debug: bool,
+    logger: logging.Logger
+) -> tuple:
+    """Locked entry point shared by the main loop, TG /checkin and once.py.
+
+    Returns (False, False) without scanning when another scan holds the lock.
+    """
+    with _scan_lock(logger) as locked:
+        if not locked:
+            return False, False
+        return _scan_all_classes(classes, cookies, locations, debug, logger)
 
 
 def seconds_until_next_start(now: datetime, start_minutes: int) -> float:

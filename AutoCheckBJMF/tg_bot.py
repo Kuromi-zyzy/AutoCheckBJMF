@@ -18,12 +18,26 @@ import requests
 
 TOKEN_FILE = Path("/opt/AutoCheckBJMF_git/.tg_token")
 CHAT_FILE = Path("/opt/AutoCheckBJMF_git/.tg_chat")
+OFFSET_FILE = Path("/opt/AutoCheckBJMF_git/.tg_offset")
 RUN_DIR = Path("/opt/AutoCheckBJMF")
 LOG = RUN_DIR / "logs/sign_log.txt"
 PY = RUN_DIR / ".venv/bin/python"
 
-TOKEN = TOKEN_FILE.read_text().strip()
-ALLOWED = {int(CHAT_FILE.read_text().strip())}
+MAX_TG_LEN = 3900  # Telegram hard limit is 4096 chars, keep headroom
+
+_token: str | None = None
+
+
+def get_token() -> str:
+    """Lazy-read so the summarize subcommand never requires credentials."""
+    global _token
+    if _token is None:
+        _token = TOKEN_FILE.read_text().strip()
+    return _token
+
+
+def get_allowed() -> set[int]:
+    return {int(CHAT_FILE.read_text().strip())}
 CLASS_LABEL = {"139098": "139098（目标班）", "139198": "139198（测试班）"}
 
 CHECKIN_SNIPPET = (
@@ -36,12 +50,14 @@ CHECKIN_SNIPPET = (
 
 
 def api(method: str, timeout: int = 35, **params):
-    r = requests.post(f"https://api.telegram.org/bot{TOKEN}/{method}",
+    r = requests.post(f"https://api.telegram.org/bot{get_token()}/{method}",
                       data=params, timeout=timeout)
     return r.json()
 
 
 def send(chat_id: int, text: str):
+    if len(text) > MAX_TG_LEN:
+        text = text[:MAX_TG_LEN] + "\n…（内容过长，已截断）"
     try:
         api("sendMessage", timeout=20, chat_id=chat_id, text=text)
     except Exception as e:
@@ -108,8 +124,21 @@ def humanize(raw_lines: list[str]) -> list[str]:
     return out
 
 
-def summarize(raw_lines: list[str]) -> str:
-    return "\n".join(humanize([strip_ts(l) for l in raw_lines]))
+def summarize(raw_lines: list[str], success_only: bool = False) -> str:
+    lines = [strip_ts(l) for l in raw_lines]
+    if success_only:
+        # healthcheck 推送只保留成功记录（连同其 Class/Coord 前置行），
+        # 失败行不进推送，留给 /status 时间线。
+        kept: list[str] = []
+        pending: list[str] = []
+        for line in lines:
+            pending.append(line)
+            if "Result: " in line:
+                if "Result: 签到成功" in line:
+                    kept.extend(pending)
+                pending = []
+        lines = kept
+    return "\n".join(humanize(lines))
 
 
 def do_checkin(chat_id: int):
@@ -123,6 +152,9 @@ def do_checkin(chat_id: int):
         send(chat_id, "⌛ 签到轮询超时（可能在退避重试），稍后用 /status 查看")
         return
     lines = [strip_ts(l) for l in read_new_log(before=before)]
+    if any("Scan skipped" in l for l in lines):
+        send(chat_id, "⏳ 自动扫描正在进行，本次 /checkin 已让位，请稍后再试")
+        return
     if any("Result: 签到成功" in l for l in lines):
         send(chat_id, "🎉 立即签到完成\n\n" + summarize_lines_keep(lines))
     elif any("Login state invalid" in l for l in lines):
@@ -158,6 +190,9 @@ def do_status(chat_id: int):
         rest = strip_ts(line)
         if "Login state invalid" in rest:
             items.append(f"· {hm} ❌ 登录失效")
+        elif "Check-in not accepted" in rest:
+            m = re.search(r"Class\[(\d+)\]", rest)
+            items.append(f"· {hm} 🚫 {class_tag(m.group(1) if m else None)} 任务未签成（拍照等，需手动）")
         elif "Result: " in rest:
             result = rest.split("Result: ")[-1].strip()
             m = re.search(r"Class\[(\d+)\]", rest)
@@ -175,11 +210,25 @@ def do_status(chat_id: int):
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] == "summarize":
-        print(summarize([l.rstrip("\n") for l in sys.stdin if l.strip()]))
+    args = sys.argv[1:]
+    if args and args[0] == "summarize":
+        success_only = "--success-only" in args
+        print(summarize([l.rstrip("\n") for l in sys.stdin if l.strip()], success_only))
         return
-    print(f"bot started, allowed={ALLOWED}", flush=True)
+
+    try:
+        allowed = get_allowed()
+    except (OSError, ValueError) as e:
+        print(f"credential file missing or invalid: {e}", flush=True)
+        sys.exit(1)
+
+    print(f"bot started, allowed={allowed}", flush=True)
     offset = 0
+    if OFFSET_FILE.exists():
+        try:
+            offset = int(OFFSET_FILE.read_text().strip())
+        except ValueError:
+            offset = 0
     while True:
         try:
             data = api("getUpdates", timeout=40, offset=offset)
@@ -187,12 +236,13 @@ def main():
             print(f"getUpdates error: {e}", flush=True)
             time.sleep(5)
             continue
-        for upd in data.get("result", []):
+        results = data.get("result", [])
+        for upd in results:
             offset = upd["update_id"] + 1
             msg = upd.get("message") or {}
             chat = msg.get("chat", {})
             text = (msg.get("text") or "").strip()
-            if chat.get("id") not in ALLOWED or not text.startswith("/"):
+            if chat.get("id") not in allowed or not text.startswith("/"):
                 continue
             cmd = text.split()[0].split("@")[0]
             if cmd == "/checkin":
@@ -201,6 +251,12 @@ def main():
                 do_status(chat["id"])
             else:
                 send(chat["id"], "可用指令：\n/checkin — 立即签到一次\n/status — 查看服务状态")
+        if results:
+            # Persist so a pm2 restart doesn't replay already-answered commands.
+            try:
+                OFFSET_FILE.write_text(str(offset))
+            except OSError as e:
+                print(f"offset persist failed: {e}", flush=True)
 
 
 if __name__ == "__main__":

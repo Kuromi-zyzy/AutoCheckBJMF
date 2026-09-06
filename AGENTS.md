@@ -23,14 +23,17 @@
 
 ## 告警与指令（TG bot @banjimofangbot「班级魔方签到」→ chat 7451198265）
 
-- 服务器 cron 每 30 分钟跑 `/opt/AutoCheckBJMF_git/healthcheck.sh`：pm2 非 online 或 sign_log 20 分钟内出现 `Login state invalid` → TG 告警；签到成功 → 推送（人话文案：班级标注+定位点，解析逻辑在 tg_bot.py 的 `summarize`）；状态变化才发（不重复轰炸），恢复也报一条
-- **TG 指令**：`/checkin` 立即签到一次（回执区分 成功/无任务/cookie 失效/拍照任务）；`/status` 进程状态+最近动态时间线。仅响应白名单 chat
+- 服务器 cron 每 30 分钟跑 `/opt/AutoCheckBJMF/healthcheck.sh`（脚本已入 git `AutoCheckBJMF/healthcheck.sh`，随部署更新）：pm2 非 online 或 sign_log 20 分钟内出现 `Login state invalid` → TG 告警；签到成功 → 推送（**只推成功记录**，人话文案：班级标注+定位点，解析逻辑在 tg_bot.py 的 `summarize --success-only`；失败行只进 /status 时间线，不刷屏）；状态变化才发（不重复轰炸），恢复也报一条
+- **TG 指令**：`/checkin` 立即签到一次（回执区分 成功/无任务/cookie 失效/拍照任务；与自动扫描互斥——撞车时回「已让位」提示）；`/status` 进程状态+最近动态时间线（含未签成任务）。仅响应白名单 chat；TG offset 持久化在 `.tg_offset`，重启不重放旧指令
+- 主循环与 /checkin 通过 `logs/scan.lock`（flock）互斥，同一 cookie 不会并发签到
 - 凭据 `.tg_token` / `.tg_chat` 在 `/opt/AutoCheckBJMF_git/`（chmod 600，不入 git）；发送记录 `.health_send.log` 可查
-- 手动自测：`echo bad > /opt/AutoCheckBJMF_git/.health_state && bash /opt/AutoCheckBJMF_git/healthcheck.sh` 应收到恢复消息
+- 手动自测：`echo bad > /opt/AutoCheckBJMF_git/.health_state && bash /opt/AutoCheckBJMF/healthcheck.sh` 应收到恢复消息
 
 ## 部署状态（2026-09-06）
 
 - 签到窗口 **18:00-22:00**（北京时间，interval 10min）；班级 139098（目标班）/139198（测试班）
+- `deploy.sh`（repo 根）与 `healthcheck.sh`（AutoCheckBJMF/）均已入 git，服务器只经部署流程更新
+- 2026-09-06 晚间修复：TG 成功推送去噪（只推成功行）、拍照等已拒绝任务 ID 记忆跳过（`_rejected_task_ids`）、重试成功不再误报、扫描锁防并发、TG 4096 字符截断
 - 服务器 `.venv` = uv 管理 Python 3.11.15（旧 pip venv/ 与备份目录已清）；影子仓 `/opt/AutoCheckBJMF_git/` rsync 时排除 `config.json`/`logs/`/`.venv/`/`DEPLOY_VERSION`
 - `DEPLOY_VERSION` 文件记录运行中代码的 commit
 - cookie 已于 2026-09-06 扫码续期，服务器实测 HTTP 200 登录有效；真实签到实战验证通过（16:47 自动签成功）
@@ -41,7 +44,7 @@
 
 - 签到窗口不支持跨午夜（start < end 会立即结束进入睡眠）；`scheduletimes` 固定 ["auto"]
 - BJMF cookie 无刷新机制，过期只能微信扫码重抓（TG 会告警提醒）
-- **拍照签到不支持**（2026-09-06 决策：暂不做）：脚本仅支持 GPS 定位签到；遇到拍照任务会明确提示"需要拍照信息，请手动签到"，不会误报成功
+- **拍照签到不支持**（2026-09-06 决策：暂不做）：脚本仅支持 GPS 定位签到；遇到拍照任务会明确提示"需要拍照信息，请手动签到"，不会误报成功；该任务 ID 会被记住（进程内 `_rejected_task_ids`），窗口内不再重复提交/刷日志，重启后重新识别一次
 
 ## 服务器侧上下文
 
