@@ -1,30 +1,44 @@
 # classmagic-sign — 班级魔方自动签到（AutoCheckBJMF）
 
-自动 GPS 定位签到：多账号/多班级/多定位点/时间窗轮询。⏸️ **2026-07-28 主动停跑过暑假（pm2 stop），开学（2026-09）上线**——上线前必修的三个 bug **已于 2026-08-29 全部修完（本地，待同步服务器）**，checklist 见文末。
+自动 GPS 定位签到：多账号/多班级/多定位点/时间窗轮询。✅ **2026-09-06 已上线运行**（服务器 pm2 常驻 + TG 告警 + git 化部署），历史三 bug（重启循环/静默退出/cookie 覆盖）已修复并实测验证。
 
-## 目录与运行形态
+## 三端格局（职责固定）
 
-- 本仓：`AutoCheckBJMF/` 子目录（src/main.py 主循环、src/once.py 单次签到、src/update_cookie.py、config.json、logs/sign_log.txt；**本地 .venv 由 uv 管理（Python 3.11），依赖=pyproject.toml + uv.lock，`uv sync` 一键装**；install.bat 已改 uv，勿再手装 pip 包）
-- 服务器：`/opt/AutoCheckBJMF`（属主 tang:tang；**无 git**，代码停在 2026-07-08 版，本地领先——部署=打包 scp 上传，流程见 vm-server 旧手册 git 历史或记忆 notes://classmagic_bjmf_server_status；服务器旧 venv= pip 手建，上线时建议换 uv sync 重建为 .venv 并更新 pm2 script 路径）
-- 守护：pm2（tang 用户），script=venv python src/main.py；开机自启待 `pm2 save && pm2 startup` 复核
+| 端 | 位置 | 职责 |
+|----|------|------|
+| WSL 主仓 | `~/projects/classmagic-sign/AutoCheckBJMF`（git main 分支） | **唯一开发地**：代码只在这里改，commit + push 即完成发布准备 |
+| GitHub | `Kuromi-zyzy/AutoCheckBJMF`（main，公开仓） | 备份 + 部署源，服务器与 WSL 以它为准同步 |
+| 服务器生产 | `tang@20.89.98.255:/opt/AutoCheckBJMF`（pm2 常驻） | 运行；代码只经 `deploy.sh` 从 GitHub 拉取，**不要手改** |
+| Win 侧 | `D:\Tools\ClassMagicSign\AutoCheckBJMF` | **纯扫码入口**（Chrome+微信抓 cookie），代码已同步但别在那里开发 |
 
-## 三个必修 bug —— 全部已修（2026-08-29，本地）
+## 日常运营（三条命令）
 
-1. **重启循环** ✅：窗口结束后不再 break 退出，改为分片（≤30min）睡眠到次日窗口开始（`seconds_until_next_start()`，每次醒来重读墙钟，防 NTP 校时漂移），并重置 last_scan/dynamic_interval。根治 pm2 42 万次重启循环（E2E 状态机测试已验证：窗口结束分支进程保持存活、SIGTERM 可优雅停机）
-2. **静默退出** ✅：load_config 三种失败（文件不存在/JSON 非法/缺必需键）均写 stderr 后 exit(1)；pm2 error log 可见。非零退出码受 pm2 unstable 保护（连续快速崩溃 16 次自动标 errored），不会再形成正常退出的死循环
-3. **update_cookie.py 覆盖 cookies 列表** ✅：改为按 `username=` 提取账号比对——同账号替换旧 cookie、新账号追加，多账号配置不再丢数据；常量改用 constants.py 统一来源
+1. **部署/更新服务器代码**（WSL 侧执行）：
+   `ssh tang@20.89.98.255 -i ~/.ssh/zhaoyang.pem 'bash /opt/AutoCheckBJMF_git/deploy.sh'`
+   → 影子仓 git reset 到 origin/main + rsync 到运行目录 + `uv sync` + pm2 restart；已是最新则自动跳过
+2. **Cookie 续期**（失效时 TG 会先收到告警）：
+   `bash AutoCheckBJMF/renew_cookie.sh`（WSL 侧；浏览器弹出后微信扫码，自动完成 合并→上传→重启→验证）
+3. **看运行状态**：
+   `ssh tang@20.89.98.255 -i ~/.ssh/zhaoyang.pem 'pm2 ls; tail -20 /opt/AutoCheckBJMF/logs/sign_log.txt'`
 
-顺手修：qiandao 每账号独立 Session（杜绝跨账号 Set-Cookie 串扰）；日志降噪（"No active check-in tasks" 降 debug，无活动轮询 30 分钟一条 Idle heartbeat，日志量 ~2MB/天 → 大幅下降）；logs/.gitkeep 恢复；install.bat 弃 pip 清华源改 `uv sync`；README 同步（uv 安装指引、窗口外行为、文件树补 update_cookie）
+## 告警（TG bot @banjimofangbot「班级魔方签到」→ chat 7451198265）
 
-## 上线 checklist（bug 已修，剩部署步骤）
+- 服务器 cron 每 30 分钟跑 `/opt/AutoCheckBJMF_git/healthcheck.sh`：pm2 非 online 或 sign_log 20 分钟内出现 `Login state invalid` → TG 推送；状态变化才发（不重复轰炸），恢复也报一条
+- 凭据 `.tg_token` / `.tg_chat` 在 `/opt/AutoCheckBJMF_git/`（chmod 600，不入 git）
+- 手动自测：`echo bad > /opt/AutoCheckBJMF_git/.health_state && bash /opt/AutoCheckBJMF_git/healthcheck.sh` 应收到恢复消息
 
-1. 同步代码上服务器（scp 打包 src/ + pyproject.toml + uv.lock + bat 脚本；config.json 按需）→ 服务器 `uv sync` 重建 .venv（旧 venv/ 可留作回滚）
-2. pm2 更新 script 路径（若换 .venv）→ `pm2 reset` 清 42 万计数
-3. Windows 扫码向导抓新 Cookie 上传 config.json（停跑 1 个月+ 大概率过期）
-4. `pm2 restart AutoCheckBJMF` → `pm2 save && pm2 startup`（确认开机自启）
-5. 观察一天：`pm2 logs` 无异常、sign_log 有记录、**重启计数不再增长**（窗口 23:00 结束后进程应保持 online 而非反复重启）
+## 部署状态（2026-09-06）
 
-已知限制：签到窗口不支持跨午夜（start < end，如 20:00→02:00 会立即结束窗口）；`scheduletimes` 固定 ["auto"]。
+- 服务器 `.venv` = uv 管理 Python 3.11.15（旧 pip venv/ 与备份目录已清）；影子仓 `/opt/AutoCheckBJMF_git/` rsync 时排除 `config.json`/`logs/`/`.venv/`/`DEPLOY_VERSION`
+- `DEPLOY_VERSION` 文件记录运行中代码的 commit
+- cookie 已于 2026-09-06 扫码续期，服务器实测 HTTP 200 登录有效
+- 实机验证：23:00 窗口结束后进程睡眠不退出（重启循环 bug 根治）、SIGTERM 优雅停机
+- `config.json` 含 cookie，各处 .gitignore 均排除，服务器上 chmod 600
+
+## 已知限制
+
+- 签到窗口不支持跨午夜（start < end 会立即结束进入睡眠）；`scheduletimes` 固定 ["auto"]
+- BJMF cookie 无刷新机制，过期只能微信扫码重抓（TG 会告警提醒）
 
 ## 服务器侧上下文
 
