@@ -21,18 +21,20 @@
 3. **看运行状态**：
    `ssh tang@20.89.98.255 -i ~/.ssh/zhaoyang.pem 'pm2 ls; tail -20 /opt/AutoCheckBJMF/logs/sign_log.txt'`
 
-## 告警（TG bot @banjimofangbot「班级魔方签到」→ chat 7451198265）
+## 告警与指令（TG bot @banjimofangbot「班级魔方签到」→ chat 7451198265）
 
-- 服务器 cron 每 30 分钟跑 `/opt/AutoCheckBJMF_git/healthcheck.sh`：pm2 非 online 或 sign_log 20 分钟内出现 `Login state invalid` → TG 推送；状态变化才发（不重复轰炸），恢复也报一条
-- 凭据 `.tg_token` / `.tg_chat` 在 `/opt/AutoCheckBJMF_git/`（chmod 600，不入 git）
+- 服务器 cron 每 30 分钟跑 `/opt/AutoCheckBJMF_git/healthcheck.sh`：pm2 非 online 或 sign_log 20 分钟内出现 `Login state invalid` → TG 告警；签到成功 → 推送（人话文案：班级标注+定位点，解析逻辑在 tg_bot.py 的 `summarize`）；状态变化才发（不重复轰炸），恢复也报一条
+- **TG 指令**：`/checkin` 立即签到一次（回执区分 成功/无任务/cookie 失效/拍照任务）；`/status` 进程状态+最近动态时间线。仅响应白名单 chat
+- 凭据 `.tg_token` / `.tg_chat` 在 `/opt/AutoCheckBJMF_git/`（chmod 600，不入 git）；发送记录 `.health_send.log` 可查
 - 手动自测：`echo bad > /opt/AutoCheckBJMF_git/.health_state && bash /opt/AutoCheckBJMF_git/healthcheck.sh` 应收到恢复消息
 
 ## 部署状态（2026-09-06）
 
+- 签到窗口 **18:00-22:00**（北京时间，interval 10min）；班级 139098（目标班）/139198（测试班）
 - 服务器 `.venv` = uv 管理 Python 3.11.15（旧 pip venv/ 与备份目录已清）；影子仓 `/opt/AutoCheckBJMF_git/` rsync 时排除 `config.json`/`logs/`/`.venv/`/`DEPLOY_VERSION`
 - `DEPLOY_VERSION` 文件记录运行中代码的 commit
-- cookie 已于 2026-09-06 扫码续期，服务器实测 HTTP 200 登录有效
-- 实机验证：23:00 窗口结束后进程睡眠不退出（重启循环 bug 根治）、SIGTERM 优雅停机
+- cookie 已于 2026-09-06 扫码续期，服务器实测 HTTP 200 登录有效；真实签到实战验证通过（16:47 自动签成功）
+- 实机验证：23:00→22:00 窗口结束后进程睡眠不退出（重启循环 bug 根治）、SIGTERM 优雅停机
 - `config.json` 含 cookie，各处 .gitignore 均排除，服务器上 chmod 600
 
 ## 已知限制
