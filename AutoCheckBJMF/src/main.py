@@ -17,7 +17,7 @@ import json
 import logging
 from logging.handlers import RotatingFileHandler
 import schedule
-from datetime import datetime
+from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 
 from rich.console import Console
@@ -35,17 +35,19 @@ def _signal_handler(signum, frame):
 
 def load_config() -> dict:
     if not os.path.exists(CONFIG_PATH):
+        print(f"[AutoCheckBJMF] config.json not found: {CONFIG_PATH}", file=sys.stderr)
         sys.exit(1)
 
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         try:
             cfg = json.load(f)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            print(f"[AutoCheckBJMF] config.json is not valid JSON: {e}", file=sys.stderr)
             sys.exit(1)
 
-    required_keys = ["classes", "locations", "cookies"]
-    for key in required_keys:
+    for key in ("classes", "locations", "cookies"):
         if key not in cfg:
+            print(f"[AutoCheckBJMF] config.json missing required key: '{key}'", file=sys.stderr)
             sys.exit(1)
 
     cfg.setdefault("scheduletimes", ["auto"])
@@ -60,7 +62,7 @@ def setup_logger(debug: bool) -> logging.Logger:
     os.makedirs(LOG_DIR, exist_ok=True)
 
     logger = logging.getLogger("AutoCheckBJMF")
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
 
     sign_handler = RotatingFileHandler(
         os.path.join(LOG_DIR, "sign_log.txt"),
@@ -68,6 +70,7 @@ def setup_logger(debug: bool) -> logging.Logger:
         backupCount=5,
         encoding="utf-8",
     )
+    sign_handler.setLevel(logging.INFO)
     sign_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
     logger.addHandler(sign_handler)
 
@@ -78,6 +81,7 @@ def setup_logger(debug: bool) -> logging.Logger:
             backupCount=5,
             encoding="utf-8",
         )
+        debug_handler.setLevel(logging.DEBUG)
         debug_handler.setFormatter(
             logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
         )
@@ -87,19 +91,8 @@ def setup_logger(debug: bool) -> logging.Logger:
 
 
 def modify_decimal_part(num: float | str) -> float:
-    num = float(num)
-    num_str = f"{num:.8f}"
-    decimal_idx = num_str.find('.')
-
-    decimal_part = num_str[decimal_idx + 4: decimal_idx + 9]
-    decimal_value = int(decimal_part)
-
-    random_offset = random.randint(-15000, 15000)
-    new_decimal_value = abs(decimal_value + random_offset)
-    new_decimal_str = f"{new_decimal_value:05d}"
-
-    new_num_str = num_str[:decimal_idx + 4] + new_decimal_str + num_str[decimal_idx + 9:]
-    return float(new_num_str)
+    """Return num shifted by a random offset of up to ±0.00015 (~±15 m)."""
+    return (round(float(num) * 1e8) + random.randint(-15000, 15000)) / 1e8
 
 
 def pick_location(locations: list) -> dict:
@@ -114,7 +107,6 @@ def qiandao(
     logger: logging.Logger
 ) -> tuple:
     url = f"{BASE_URL}/student/course/{class_id}/punchs"
-    session = requests.Session()
     error_cookies = []
     null_count = 0
     success_count = 0
@@ -123,6 +115,10 @@ def qiandao(
     for uid, raw_cookie in enumerate(cookies):
         if _stop_event.is_set():
             break
+
+        # One session per account so response Set-Cookie from a previous
+        # account can never bleed into the next one's requests.
+        session = requests.Session()
 
         username_match = re.search(r'username=[^;]+', raw_cookie)
         username_tag = f" <{username_match.group(0).split('=')[1]}>" if username_match else ""
@@ -170,7 +166,7 @@ def qiandao(
             had_task = True
 
         if not all_matches:
-            logger.info(f"Class[{class_id}] | No active check-in tasks")
+            logger.debug(f"Class[{class_id}] | No active check-in tasks")
             continue
 
         for match_id in all_matches:
@@ -249,10 +245,13 @@ def run_all_classes(
     locations: list,
     debug: bool,
     logger: logging.Logger
-) -> bool:
-    logger.info(f"Check-in start | Classes: {len(classes)}  Accounts: {len(cookies)}  Locations: {len(locations)}")
-
+) -> tuple:
     had_success = False
+    had_activity = False
+    logger.debug(
+        f"Check-in start | Classes: {len(classes)}  Accounts: {len(cookies)}  "
+        f"Locations: {len(locations)}"
+    )
     for class_id in classes:
         if _stop_event.is_set():
             break
@@ -263,6 +262,8 @@ def run_all_classes(
 
         if success_count > 0:
             had_success = True
+        if had_task or success_count > 0 or error_cookies or null_count > 0:
+            had_activity = True
 
         if error_cookies:
             error_cookies = retry_with_backoff(
@@ -278,11 +279,24 @@ def run_all_classes(
             logger.error(f"Class[{class_id}] | some accounts still failed after retries")
         elif null_count > 0:
             logger.warning(f"Class[{class_id}] | {null_count} invalid cookie(s)")
-        else:
+        elif had_task:
             logger.info(f"Class[{class_id}] | all check-ins successful")
 
-    logger.info("Check-in complete")
-    return had_success
+    if had_activity:
+        logger.info("Check-in complete")
+    return had_success, had_activity
+
+
+def seconds_until_next_start(now: datetime, start_minutes: int) -> float:
+    """Seconds from now until tomorrow's window start (HH:MM -> minutes of day).
+
+    Used after the check-in window ends: instead of exiting (which makes pm2
+    restart-loop all night), the process sleeps until the next window.
+    """
+    next_start = datetime.combine(
+        now.date() + timedelta(days=1), datetime.min.time()
+    ) + timedelta(minutes=start_minutes)
+    return max(0.0, (next_start - now).total_seconds())
 
 
 def main():
@@ -330,6 +344,7 @@ def main():
 
         last_scan = None
         dynamic_interval = interval
+        last_idle_log = datetime.now()
         while not _stop_event.is_set():
             now = datetime.now()
             current_minutes = now.hour * 60 + now.minute
@@ -337,12 +352,23 @@ def main():
             if start_minutes <= current_minutes < end_minutes:
                 if last_scan is None or (now - last_scan).total_seconds() >= dynamic_interval * 60:
                     last_scan = now
-                    had_success = run_all_classes(classes, cookies, locations, debug, logger)
+                    had_success, had_activity = run_all_classes(
+                        classes, cookies, locations, debug, logger
+                    )
                     if had_success:
                         dynamic_interval = min(interval * 2, 30)
                         logger.info(f"Check-in succeeded, next scan in {dynamic_interval} min")
                     else:
                         dynamic_interval = interval
+
+                    if not had_activity:
+                        if (now - last_idle_log).total_seconds() >= 1800:
+                            logger.info(
+                                "Idle heartbeat: window active, no check-in tasks seen"
+                            )
+                            last_idle_log = now
+                    else:
+                        last_idle_log = now
 
                 sleep_time = min(60, dynamic_interval * 60 - (datetime.now() - last_scan).total_seconds())
                 if sleep_time > 0:
@@ -353,8 +379,21 @@ def main():
                 _stop_event.wait(min(wait_minutes * 60, 1800))
 
             else:
-                logger.info("Check-in window ended")
-                break
+                # Sleep until tomorrow's window instead of exiting: exiting
+                # makes pm2 restart the process immediately, which used to
+                # loop all night (420k+ restarts on the server).
+                logger.info("Check-in window ended, sleeping until next window start")
+                last_scan = None
+                dynamic_interval = interval
+                while not _stop_event.is_set():
+                    cur = datetime.now().hour * 60 + datetime.now().minute
+                    if cur < end_minutes:
+                        # Crossed past midnight: hand control back to the
+                        # outer loop so the pre-window branch takes over.
+                        break
+                    wait_s = seconds_until_next_start(datetime.now(), start_minutes)
+                    if _stop_event.wait(min(1800, wait_s)):
+                        break
 
         logger.info("AutoCheckBJMF stopped")
 

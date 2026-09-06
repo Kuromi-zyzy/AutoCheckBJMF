@@ -70,13 +70,17 @@
 **双击 `install.bat`**，等待窗口显示"安装完成！"后按任意键关闭。
 
 程序会自动做以下事情（全程无需你操作）：
-1. 检查电脑有没有装 Python
-2. 创建一个独立的 Python 运行环境
-3. 自动下载安装需要的工具包（使用清华镜像，速度很快）
+1. 检查电脑有没有装 uv（一个极快的 Python 包管理器）
+2. 自动创建一个独立的 Python 运行环境
+3. 按 `uv.lock` 锁定的版本自动下载安装全部依赖
 
 整个过程大约 2-5 分钟，取决于网速。
 
-> **双击后闪退？** 说明电脑没有安装 Python。到 [python.org](https://www.python.org/downloads/) 下载安装，安装时 **一定要勾选** "Add Python to PATH"。
+> **双击后闪退？** 说明电脑没有安装 uv。按 `Win + X` 打开终端，粘贴以下命令回车安装，然后重新双击 `install.bat`：
+>
+> ```powershell
+> powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+> ```
 
 > **窗口提示 "access denied"？** 右键 `install.bat` → "以管理员身份运行"。
 
@@ -128,7 +132,7 @@
 
 确认程序是否在运行：右键任务栏 → 任务管理器 → 详细信息 → 查找 `pythonw.exe`。
 
-> ⚠️ **注意**：程序**仅在配置的时间窗口内**执行签到。窗口外会静默等待或退出，任务管理器可能看不到进程，这是正常行为。
+> ⚠️ **注意**：程序**仅在配置的时间窗口内**执行签到。窗口外会在后台静默等待到下一个签到窗口（进程不退出），这是正常行为。
 
 ---
 
@@ -249,9 +253,10 @@ A：会。后台签到使用 `pythonw.exe` 独立运行，不依赖终端窗口�
 ```
 AutoCheckBJMF/
 │
-├── install.bat             安装环境（仅首次，自动创建虚拟环境 + 装依赖）
+├── install.bat             安装环境（仅首次，uv sync 一键装好）
 ├── config_wizard.bat       配置向导入口（双击打开，扫码登录、设置定位和时间）
 ├── start_checkin.bat       启动后台签到（双击后自动在后台运行，关窗口不中断）
+├── update_cookie.bat       只更新 Cookie（扫码后按账号合并，不动其他配置）
 ├── SetAutoStart.bat        设置开机自启（把 start_checkin.bat 加入启动文件夹）
 ├── checkin_now.ps1         立即签到一次（右键 → 使用 PowerShell 运行）
 ├── config.json             配置文件（向导生成，含班级、账号、定位、时间窗口）
@@ -261,6 +266,7 @@ AutoCheckBJMF/
 │   ├── main.py             后台签到主程序（定时检测 + 自动签到，无控制台输出）
 │   ├── once.py             立即签到程序（手动运行，签到一次后退出）
 │   ├── make_config.py      配置向导程序（交互式配置班级、Cookie、定位、时间）
+│   ├── update_cookie.py    Cookie 更新程序（扫码抓取，按 username 合并到现有账号列表）
 │   ├── constants.py        公共常量（路径、URL、UA 等，被各模块引用）
 │   └── banner.py           启动画面 & 控制台对象（供配置向导和签到脚本共用）
 │
@@ -310,23 +316,22 @@ AutoCheckBJMF/
 ### 安装依赖
 
 ```bash
-# uv（推荐，速度快）
+# uv（唯一支持的方式，依赖版本以 uv.lock 为准）
 uv sync
-
-# 或 pip
-pip install beautifulsoup4 drissionpage prompt-toolkit questionary requests rich schedule
 ```
 
 ### pm2 管理进程
 
 ```bash
 npm install -g pm2
-pm2 start src/main.py --name AutoCheckBJMF --interpreter python3
+uv sync
+pm2 start .venv/bin/python --name AutoCheckBJMF -- src/main.py
 pm2 startup && pm2 save
 
-# 查看状态 / 日志
+# 查看状态 / 日志 / 清零重启计数
 pm2 status
 pm2 logs AutoCheckBJMF
+pm2 reset AutoCheckBJMF
 ```
 
 > Cookie 过期后，在 Windows 上重新运行配置向导，把新的 `config.json` 上传到服务器，执行 `pm2 restart AutoCheckBJMF`。
