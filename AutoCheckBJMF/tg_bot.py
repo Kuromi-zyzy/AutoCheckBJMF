@@ -76,6 +76,13 @@ def do_checkin(chat_id: int):
     elif any("Login state invalid" in l for l in lines):
         send(chat_id, "❌ 签到失败：登录态无效，cookie 可能已过期\n"
                       "处理：WSL 侧 bash AutoCheckBJMF/renew_cookie.sh 扫码续期")
+    elif any("CheckInID" in l for l in lines):
+        results = [l.split("Result: ")[-1].strip()
+                   for l in lines if "Result: " in l]
+        uniq = "；".join(dict.fromkeys(results)) or "结果未知"
+        send(chat_id, "⚠️ 发现签到任务，但未签成：\n"
+                      f"{uniq}\n"
+                      "（拍照签到等类型脚本暂不支持，请手动签到）")
     else:
         summary = "\n".join(f"· {l}" for l in lines[-5:]) or "（本轮无任何日志活动）"
         send(chat_id, f"✅ 签到轮询完成，当前无待签任务\n{summary}")

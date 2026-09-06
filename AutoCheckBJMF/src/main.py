@@ -207,6 +207,12 @@ def qiandao(
                     if result_text == "\u7b7e\u5230\u6210\u529f":
                         success_count += 1
                         break
+                    else:
+                        # e.g. photo-required sign-ins: submitted but rejected
+                        logger.warning(
+                            f"UID[{uid + 1}{username_tag}] | Class[{class_id}] | "
+                            f"Check-in not accepted: {result_text}"
+                        )
                 else:
                     logger.warning(
                         f"UID[{uid + 1}{username_tag}] | Class[{class_id}] | No result tag"
@@ -280,7 +286,13 @@ def run_all_classes(
         elif null_count > 0:
             logger.warning(f"Class[{class_id}] | {null_count} invalid cookie(s)")
         elif had_task:
-            logger.info(f"Class[{class_id}] | all check-ins successful")
+            if success_count > 0:
+                logger.info(f"Class[{class_id}] | all check-ins successful")
+            else:
+                logger.warning(
+                    f"Class[{class_id}] | check-in task found but not accepted "
+                    f"(photo/other type?), manual check-in may be needed"
+                )
 
     if had_activity:
         logger.info("Check-in complete")
